@@ -300,23 +300,31 @@ app.layout = html.Div(
     [Input("state-select", "value"), Input("region-select-all", "value")],
 )
 def update_region_dropdown(state_select, select_all):
+    if not state_select:
+        return [], []
+        
     # Filter data for the selected state
     state_data = df_shark[df_shark["State"] == state_select]
 
-    # Get unique regions for the selected state
-    regions = state_data["Location"].unique() if not state_data.empty else []
+    # Get unique regions and handle NaN values
+    regions = state_data["Location"].fillna("Unknown Location").unique()
+    
+    # Convert all values to strings and filter out empty strings
+    regions = [str(region) for region in regions if str(region).strip()]
+    
+    # Sort the cleaned list
+    regions.sort()
 
     # Create dropdown options
     options = [{"label": region, "value": region} for region in regions]
 
     # Auto-select all regions if "Select All Regions" is checked
-    if select_all == ["All"]:
-        value = [region["value"] for region in options]
+    if select_all and "All" in select_all:
+        value = regions
     else:
         value = []
 
     return options, value
-
 @app.callback(
     Output("checklist-container", "children"),
     [Input("region-select", "value")],
@@ -498,16 +506,43 @@ def update_procedure_stats(procedure_select, geo_select, cost_select, state_sele
         style_header={"background-color": "#1f2536", "padding": "2px 12px 0px 12px"},
     )
 
-# Callback to update the choropleth map
+# Create a mapping from state abbreviations to state codes
+state_code_mapping = {
+    "NSW": "1",  # New South Wales
+    "VIC": "2",  # Victoria
+    "QLD": "3",  # Queensland
+    "WA": "4",   # Western Australia
+    "SA": "5",   # South Australia
+    "TAS": "6",  # Tasmania
+    "NT": "7",   # Northern Territory
+    "ACT": "8",  # Australian Capital Territory
+}
+
 @app.callback(
     Output("geo-map", "figure"),
-    [Input("metric-select", "value")]
+    [Input("state-select", "value"), Input("metric-select", "value")]
 )
+def update_choropleth_map(state_select, selected_metric):
+    # Map the selected state abbreviation to its corresponding state code
+    state_code = state_code_mapping.get(state_select)
 
-def update_choropleth_map(selected_metric):
+    # Filter the DataFrame based on the selected state abbreviation
+    filtered_data = df_shark[df_shark['State'] == state_select]
+
+    # Check if filtered_data is empty
+    if filtered_data.empty:
+        return {
+            "data": [],
+            "layout": go.Layout(
+                title="No data available for the selected state",
+                paper_bgcolor="#171b26",
+                plot_bgcolor="#171b26",
+            ),
+        }
+
     # Generate the choropleth plot
     fig = px.choropleth(
-        data_frame=df_shark,
+        data_frame=filtered_data,
         geojson=aus_states_geojson,
         locations="State",  # Column in DataFrame
         featureidkey="properties.STATE_CODE",  # Match GeoJSON key to column
@@ -517,11 +552,14 @@ def update_choropleth_map(selected_metric):
         labels={selected_metric: "Metric Value"},
     )
 
-    # Update layout for better appearance
+    # Update layout for better 
     fig.update_geos(
         fitbounds="locations",
-        visible=False,
-        bgcolor="#171b26"  # Background color
+        visible=True,  # Ensure the map is visible
+        bgcolor="#171b26",  # Background color
+        projection_type="mercator",  # Set projection to Mercator
+        center={"lat": -25.2744, "lon": 133.7751},  # Center on Australia
+        scope="asia"  # Set the scope to Asia to focus on Australia
     )
 
     fig.update_layout(
