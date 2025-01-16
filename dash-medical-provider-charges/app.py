@@ -296,50 +296,26 @@ app.layout = html.Div(
 )
 
 @app.callback(
-    [
-        Output("region-select", "value"),
-        Output("region-select", "options"),
-        Output("map-title", "children"),
-    ],
-    [Input("region-select-all", "value"), Input("state-select", "value"),],
+    [Output("region-select", "options"), Output("region-select", "value")],
+    [Input("state-select", "value"), Input("region-select-all", "value")],
 )
-def update_region_dropdown(select_all, state_select):
-    # Filter the data for the selected state
-    state_raw_data = df_shark[df_shark['State'] == state_select]
-    
-    # Get unique regions
-    regions = state_raw_data['Location'].unique() if not state_raw_data.empty else []
-    lat = pd.to_numeric(df_shark['Latitude'], errors='coerce')
+def update_region_dropdown(state_select, select_all):
+    # Filter data for the selected state
+    state_data = df_shark[df_shark["State"] == state_select]
 
-    latitude = state_raw_data['Latitude'].unique() if not state_raw_data.empty else []
-    long = state_raw_data['Latitude'].unique() if not state_raw_data.empty else []
+    # Get unique regions for the selected state
+    regions = state_data["Location"].unique() if not state_data.empty else []
 
-    print(type(df_shark["Latitude"]))
-    
-    # Create options for the dropdown
-    for i in regions:
-        if i:
-            for j in latitude:
-                if j:
-                    options = [{"labelSSS": i, "value": j}]
+    # Create dropdown options
+    options = [{"label": region, "value": region} for region in regions]
 
-    # Debugging: Print the options to verify their structure
-    print("Dropdown options:", options[0])
-
-    ctx = callback_context
-    if ctx.triggered[0]["prop_id"].split(".")[0] == "region-select-all":
-        if select_all == ["All"]:
-            value = [i["value"] for i in options]
-        else:
-            value = no_update
+    # Auto-select all regions if "Select All Regions" is checked
+    if select_all == ["All"]:
+        value = [region["value"] for region in options]
     else:
-        value = regions[:4] if len(regions) >= 4 else regions
+        value = []
 
-    return (
-        value,
-        options,
-        "Shark Incidents in {}".format(state_select),
-    )
+    return options, value
 
 @app.callback(
     Output("checklist-container", "children"),
