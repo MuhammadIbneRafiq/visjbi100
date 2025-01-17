@@ -559,7 +559,7 @@ def update_choropleth_map(state_select, selected_metric):
         bgcolor="#171b26",  # Background color
         projection_type="mercator",  # Set projection to Mercator
         center={"lat": -25.2744, "lon": 133.7751},  # Center on Australia
-        scope="asia"  # Set the scope to Asia to focus on Australia
+        scope="world"  # Set the scope to Asia to focus on Australia
     )
 
     fig.update_layout(
