@@ -66,6 +66,9 @@ def update_slider_1_output(value):
 def update_slider_2_output(value):
     return f"Slider 2 Value: {value}"
 
+
+server = app.server
+
 # Run the app
 if __name__ == "__main__":
     app.run_server(debug=True)
