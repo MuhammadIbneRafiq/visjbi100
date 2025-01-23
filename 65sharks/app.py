@@ -9,27 +9,41 @@ import numpy as np
 import plotly.express as px
 import json
 
-# File paths
-file_path = 'data/Australian Shark-Incident Database Public Version.xlsx'
+# # File paths
+# file_path = 'data/Australian Shark-Incident Database Public Version.xlsx'
 geojson_path = "data/australian-states.json"
 
-# Efficiently load the Excel file using openpyxl
-wb = load_workbook(filename=file_path, read_only=True)
-sheet = wb.active
+# # Efficiently load the Excel file using openpyxl
+# wb = load_workbook(filename=file_path, read_only=True)
+# sheet = wb.active
 
-# Load all rows into a list
-df_chunks = []
-for row in sheet.iter_rows(values_only=True):
-    df_chunks.append(row)
+# # Load all rows into a list
+# df_chunks = []
+# for row in sheet.iter_rows(values_only=True):
+#     df_chunks.append(row)
 
-# Convert rows into a DataFrame while preserving the original structure
-df_shark = pd.DataFrame(df_chunks[1:], columns=df_chunks[0])
+# # Convert rows into a DataFrame while preserving the original structure
+# df_shark = pd.DataFrame(df_chunks[1:], columns=df_chunks[0])
 
-# Drop rows with completely null values to avoid issues in plotting
-df_shark.dropna(how='all', inplace=True)
+# # Drop rows with completely null values to avoid issues in plotting
+# df_shark.dropna(how='all', inplace=True)
 
-# Optionally, clean specific columns (e.g., 'State') if they have null values
-df_shark = df_shark[df_shark['State'].notnull()]
+# # Optionally, clean specific columns (e.g., 'State') if they have null values
+# df_shark = df_shark[df_shark['State'].notnull()]
+
+# Replace the above loading code with dummy data
+df_shark = pd.DataFrame({
+    'State': ['State1', 'State2', 'State1', 'State2'],
+    'Victim.age': [25, 30, 22, 28],
+    'Shark.length.m': [2.5, 3.0, 1.8, 2.2],
+    'Incident.year': [2020, 2021, 2020, 2021],
+    'Shark.common.name': ['Shark1', 'Shark2', 'Shark1', 'Shark2'],
+    'Location': ['Location1', 'Location2', 'Location1', 'Location2'],
+    'Victim.injury': ['non-fatal', 'fatal', 'non-fatal', 'non-fatal'],
+    'No.sharks': [1, 2, 1, 1],
+    'fatal_count': [0, 1, 0, 0],
+    'incident_count': [1, 1, 1, 1],
+})
 
 # Load GeoJSON file for Australian states
 with open(geojson_path) as f:
