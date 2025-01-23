@@ -3,7 +3,7 @@ import plotly.graph_objs as go
 from dash.dependencies import State, Input, Output
 from dash.exceptions import PreventUpdate
 from openpyxl import load_workbook
-
+import os
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -775,4 +775,5 @@ def update_choropleth_map(selected_states, selected_metrics, year_range):
 
 
 if __name__ == "__main__":
-    app.run_server(debug=False, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    app.run_server(debug=False, host="0.0.0.0", port=port)
