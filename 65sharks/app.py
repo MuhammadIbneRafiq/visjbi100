@@ -2,19 +2,40 @@ from dash import Dash, dcc, html, dash_table, no_update, callback_context
 import plotly.graph_objs as go
 from dash.dependencies import State, Input, Output
 from dash.exceptions import PreventUpdate
+from openpyxl import load_workbook
 
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import json
 
-# Load and prepare the shark attack data
+# File paths
 file_path = 'data/Australian Shark-Incident Database Public Version.xlsx'
-df_shark = pd.read_excel(file_path, index_col=0)
+geojson_path = "data/australian-states.json"
 
-with open("data/australian-states.json") as f:
+# Efficiently load the Excel file using openpyxl
+wb = load_workbook(filename=file_path, read_only=True)
+sheet = wb.active
+
+# Load all rows into a list
+df_chunks = []
+for row in sheet.iter_rows(values_only=True):
+    df_chunks.append(row)
+
+# Convert rows into a DataFrame while preserving the original structure
+df_shark = pd.DataFrame(df_chunks[1:], columns=df_chunks[0])
+
+# Drop rows with completely null values to avoid issues in plotting
+df_shark.dropna(how='all', inplace=True)
+
+# Optionally, clean specific columns (e.g., 'State') if they have null values
+df_shark = df_shark[df_shark['State'].notnull()]
+
+# Load GeoJSON file for Australian states
+with open(geojson_path) as f:
     aus_states_geojson = json.load(f)
 
+# Initialize the Dash app
 app = Dash(
     __name__,
     meta_tags=[
@@ -26,9 +47,9 @@ app = Dash(
 )
 app.title = "Australian Shark Incident Analysis"
 server = app.server
-
 app.config["suppress_callback_exceptions"] = True
 
+# Build the upper-left panel
 def build_upper_left_panel():
     return html.Div(
         id="upper-left",
@@ -39,152 +60,78 @@ def build_upper_left_panel():
                 children="Choose filters to see shark incident data",
             ),
             html.Div(
-                className="control-row-1",
+                className="filter-section",
                 children=[
-                    html.Div(
-                        id="state-select-outer",
-                        children=[
-                            html.Label("Select a State"),
-                            dcc.Dropdown(
-                                id="state-select",
-                                options=[{"label": i, "value": i} for i in df_shark['State'].unique()],
-                                value=df_shark['State'].unique()[0],
-                            ),
-                        ],
-                    ),
-                    html.Div(
-                        id="select-metric-outer",
-                        children=[
-                            html.Label("Choose a Metric"),
-                            dcc.Dropdown(
-                                id="metric-select",
-                                options=[
-                                    {"label": "Victim Age", "value": "Victim.age"},
-                                    {"label": "Shark Length", "value": "Shark.length.m"},
-                                ],
-                                value="Victim.age",
-                            ),
-                        ],
+                    html.Label(className="filter-section-title", children="Compare States"),
+                    dcc.Dropdown(
+                        id="state-select",
+                        options=[{"label": i, "value": i} for i in df_shark['State'].unique()],
+                        value=[df_shark['State'].unique()[0]],
+                        multi=True,
+                        placeholder="Select states to compare",
+                        className="dropdown",
                     ),
                 ],
             ),
             html.Div(
-                id="region-select-outer",
-                className="control-row-2",
+                className="filter-section",
                 children=[
-                    html.Label("Pick a Region"),
-                    html.Div(
-                        id="checklist-container",
-                        children=dcc.Checklist(
-                            id="region-select-all",
-                            options=[{"label": "Select All Regions", "value": "All"}],
-                            value=[],
-                        ),
+                    html.Label(className="filter-section-title", children="Choose Metrics to Compare"),
+                    dcc.Dropdown(
+                        id="metric-select",
+                        options=[
+                            {"label": "Victim Age", "value": "Victim.age"},
+                            {"label": "Shark Length (m)", "value": "Shark.length.m"},
+                            {"label": "Number of Sharks", "value": "No.sharks"},
+                            {"label": "Fatal Incidents", "value": "fatal_count"},
+                            {"label": "Total Incidents", "value": "incident_count"},
+                        ],
+                        value=["incident_count"],
+                        multi=True,
+                        className="dropdown",
                     ),
-                    html.Div(
-                        id="region-select-dropdown-outer",
-                        children=dcc.Dropdown(
-                            id="region-select", multi=True, searchable=True,
-                        ),
+                ],
+            ),
+            html.Div(
+                className="filter-section",
+                children=[
+                    html.Label(className="filter-section-title", children="Filter by Region"),
+                    dcc.Checklist(
+                        id="region-select-all",
+                        options=[{"label": "Select All Regions", "value": "All"}],
+                        value=[],
+                        className="checkbox",
+                    ),
+                    dcc.Dropdown(
+                        id="region-select",
+                        multi=True,
+                        searchable=True,
+                        placeholder="Select specific regions",
+                        className="dropdown",
                     ),
                 ],
             ),
         ],
     )
 
-def generate_procedure_plot(raw_data, cost_select, region_select, provider_select):
-    # Filter data based on region
-    procedure_data = raw_data[raw_data['State'].isin(region_select)].reset_index()
-
-    traces = []
-    selected_index = procedure_data[
-        procedure_data['Location'].isin(provider_select)
-    ].index
-
-    text = (
-        procedure_data['Location']
-        + "<br>"
-        + "<b>"
-        + procedure_data['Shark.common.name'].map(str)
-        + "/<b> <br>"
-        + "Incident Year: "
-        + procedure_data['Incident.year'].map(str)
-    )
-
-    provider_trace = go.Box(
-        y=procedure_data['Shark.common.name'],
-        x=procedure_data[cost_select],
-        name="",
-        customdata=procedure_data['Location'],
-        boxpoints="all",
-        jitter=0,
-        pointpos=0,
-        hoveron="points",
-        fillcolor="rgba(0,0,0,0)",
-        line=dict(color="rgba(0,0,0,0)"),
-        hoverinfo="text",
-        hovertext=text,
-        selectedpoints=selected_index,
-        selected=dict(marker={"color": "#FFFF00", "size": 13}),
-        unselected=dict(marker={"opacity": 0.2}),
-        marker=dict(
-            line=dict(width=1, color="#000000"),
-            color="#21c7ef",
-            opacity=0.7,
-            symbol="square",
-            size=12,
-        ),
-    )
-
-    traces.append(provider_trace)
-
-    layout = go.Layout(
-        showlegend=False,
-        hovermode="closest",
-        dragmode="select",
-        clickmode="event+select",
-        xaxis=dict(
-            zeroline=False,
-            automargin=True,
-            showticklabels=True,
-            title=dict(text="Metric", font=dict(color="#737a8d")),
-            linecolor="#737a8d",
-            tickfont=dict(color="#737a8d"),
-            type="log",
-        ),
-        yaxis=dict(
-            automargin=True,
-            showticklabels=True,
-            tickfont=dict(color="#737a8d"),
-            gridcolor="#171b26",
-        ),
-        plot_bgcolor="#171b26",
-        paper_bgcolor="#171b26",
-    )
-    return {"data": traces, "layout": layout}
-
+# Create a parallel coordinates plot
 def create_parallel_coordinates():
-    # Select numerical columns for parallel coordinates
     numerical_cols = ['Victim.age', 'Shark.length.m', 'Latitude', 'Longitude', 'Incident.year']
     dimensions = []
 
-    # Loop through the numerical columns and handle data conversion
     for col in numerical_cols:
-       
-        # Convert column to numeric, coercing errors to NaN
         numeric_series = pd.to_numeric(df_shark[col], errors='coerce')
-        
-        # Create the dimension for the plot
         dimensions.append(
             dict(
                 range=[numeric_series.min(), numeric_series.max()],
                 label=col.replace('.', ' '),
-                values=numeric_series,
-                ticktext=None,
-                tickvals=None
+                values=numeric_series
             )
         )
     
+    
+    # Add categorical dimension for Shark Species
+
     # Add categorical dimension for Shark Species
     dimensions.append(
         dict(
@@ -196,6 +143,9 @@ def create_parallel_coordinates():
         )
     )
     
+    
+    # Create parallel coordinates plot
+
     # Create parallel coordinates plot
     fig = go.Figure(data=
         go.Parcoords(
@@ -207,6 +157,9 @@ def create_parallel_coordinates():
         )
     )
     
+    
+    # Update layout
+
     # Update layout
     fig.update_layout(
         plot_bgcolor='#171b26',
@@ -217,8 +170,68 @@ def create_parallel_coordinates():
     
     return fig
 
-# Add this to app layout in the lower container
+# Callback to update the parallel coordinates plot dynamically
+@app.callback(
+    Output("parallel-coords-plot", "figure"),
+    [
+        Input("state-select", "value"),
+        Input("year-slider", "value")
+    ]
+)
+def update_parallel_coordinates(selected_states, year_range):
+    if not selected_states:
+        selected_states = df_shark['State'].unique()
+        
+    filtered_df = df_shark[
+        (df_shark['State'].isin(selected_states)) &
+        (df_shark['Incident.year'] >= year_range[0]) &
+        (df_shark['Incident.year'] <= year_range[1])
+    ]
+    
+    numerical_cols = ['Victim.age', 'Shark.length.m', 'Latitude', 'Longitude', 'Incident.year']
+    dimensions = []
+    
+    
+    # Create dimensions for numerical columns
 
+    # Create dimensions for numerical columns
+    for col in numerical_cols:
+        numeric_series = pd.to_numeric(filtered_df[col], errors='coerce')
+        dimensions.append(
+            dict(
+                range=[numeric_series.min(), numeric_series.max()],
+                label=col.replace('.', ' '),
+                values=numeric_series
+            )
+        )
+    
+    dimensions.append(
+        dict(
+            range=[0, len(filtered_df['State'].unique())],
+            ticktext=filtered_df['State'].unique(),
+            tickvals=list(range(len(filtered_df['State'].unique()))),
+            label='State',
+            values=[list(filtered_df['State'].unique()).index(x) for x in filtered_df['State']]
+        )
+    )
+    
+    fig = go.Figure(data=
+        go.Parcoords(
+            line=dict(
+                color=filtered_df['Incident.year'],
+                colorscale='Viridis'
+            ),
+            dimensions=dimensions
+        )
+    )
+    fig.update_layout(
+        title_text=f"Parallel Coordinates View ({year_range[0]}-{year_range[1]})",
+        plot_bgcolor='#171b26',
+        paper_bgcolor='#171b26',
+        font=dict(color='#737a8d')
+    )
+    
+    return fig
 
 # Define the layout
 app.layout = html.Div(
@@ -228,9 +241,42 @@ app.layout = html.Div(
             id="banner",
             className="banner",
             children=[
-                html.H6("Australian Shark attack"),
+                html.H6("Australian Shark Attack"),
                 html.Img(src=app.get_asset_url("plotly_logo_white.png")),
             ],
+        ),
+        html.Div(
+            [
+                # Main Content (Slider + Map)
+                html.Div(
+                    className="map-and-slider",
+                    children=[
+                        # Slider on top of the map
+                        html.Div(
+                            className="filter-section",
+                            children=[
+                                html.Label(className="filter-section-title", children="Year Range"),
+                                dcc.RangeSlider(
+                                    id="year-slider",
+                                    min=df_shark['Incident.year'].min(),
+                                    max=df_shark['Incident.year'].max(),
+                                    step=1,
+                                    marks={
+                                        str(year): str(year)
+                                        for year in range(
+                                            int(df_shark['Incident.year'].min()),
+                                            int(df_shark['Incident.year'].max()) + 1,
+                                            10,
+                                        )
+                                    },
+                                    value=[df_shark['Incident.year'].min(), df_shark['Incident.year'].max()],
+                                    className="range-slider",
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ]
         ),
         html.Div(
             id="upper-container",
@@ -269,31 +315,166 @@ app.layout = html.Div(
         ),
         html.Div(
             id="lower-container",
+            className="row",
             children=[
-                dcc.Graph(
-                    id="procedure-plot",
-                    figure=generate_procedure_plot(
-                        df_shark, 'Victim.age', df_shark['State'].unique(), []
-                    ),
-                ),
-                # Add parallel coordinates plot
+                # Parallel Coordinates Plot
                 html.Div(
-                    className="twelve columns",
+                    className="six columns",
                     children=[
                         html.P(
                             className="section-title",
                             children="Parallel Coordinates View of Shark Incident Data",
                         ),
                         dcc.Graph(
-                            id='parallel-coords-plot',
+                            id="parallel-coords-plot",
                             figure=create_parallel_coordinates()
-                        )
-                    ]
-                )
+                        ),
+                    ],
+                ),
+                # Radar Plot
+                html.Div(
+                    className="six columns",
+                    children=[
+                        html.P(
+                            className="section-title",
+                            children="Radar Plot: Shark Incidents by Month and State",
+                        ),
+                        dcc.Graph(
+                            id="radar-plot",
+                            figure={}  # Initial empty figure
+                        ),
+                    ],
+                ),
+                html.Div(
+                    id="splom-container",
+                    children=[
+                        html.P(
+                            className="section-title",
+                            children="Scatterplot Matrix (SPLOM) of Shark Incidents",
+                        ),
+                        dcc.Graph(
+                            id="splom-chart",
+                            figure={}  # Initial empty figure
+                        ),
+                    ],
+                ),
+                
             ],
         ),
     ],
 )
+
+# @app.callback(
+#     Output("radar-plot", "figure"),
+#     [Input("state-select", "value")]
+# )
+# def update_radar_plot(selected_states):
+#     if not selected_states:
+#         selected_states = df_shark["State"].unique()
+
+#     # Filter data for selected states
+#     filtered_data = df_shark[df_shark["State"].isin(selected_states)]
+
+#     # Group data by month and state, and count the incidents
+#     radar_data = (
+#         filtered_data.groupby(['Incident.month', 'State'])
+#         .size()
+#         .reset_index(name='Incidents')  # 'Incidents' column now contains the count
+#     )
+
+#     # Create a pivot table to organize data for plotting
+#     radar_pivot = radar_data.pivot(index='Incident.month', columns='State', values='Incidents').fillna(0)
+#     radar_pivot = radar_pivot.reindex(range(1, 13), fill_value=0)  # Ensure all months are represented
+#     radar_pivot.reset_index(inplace=True)
+#     radar_pivot.rename(columns={'Incident.month': 'Month'}, inplace=True)
+
+#     # Month mapping for consistent display
+#     month_mapping = {
+#         1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+#         5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+#         9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+#     }
+#     radar_pivot['Month'] = radar_pivot['Month'].map(month_mapping)
+
+#     # Melt the data for plotting
+#     melted_data = radar_pivot.melt(id_vars='Month', var_name='State', value_name='Incidents')
+
+#     # Debugging: Print the final melted data
+#     print("Melted Data:", melted_data)
+
+#     # Create the radar plot
+#     fig = px.line_polar(
+#         melted_data,
+#         r='Incidents',
+#         theta='Month',
+#         color='State',
+#         line_close=True,
+#         title="Shark Incidents by Month and State"
+#     )
+
+#     # Adjust layout
+#     fig.update_layout(
+#         polar=dict(
+#             angularaxis=dict(
+#                 categoryorder='array',
+#                 categoryarray=["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+#                                "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]  # Explicit order
+#             )
+#         ),
+#         legend=dict(
+#             title="State",
+#             orientation="h",
+#             yanchor="bottom",
+#             y=-0.2,
+#             xanchor="center",
+#             x=0.5
+#         ),
+#     )
+#     return fig
+
+# Callback for SPLOM chart
+@app.callback(
+    Output("splom-chart", "figure"),
+    [Input("state-select", "value")]
+)
+def update_splom_chart(selected_states):
+    # Filter data based on selected states
+    if not selected_states:
+        selected_states = df_shark["State"].unique()
+    df_filtered = df_shark[df_shark["State"].isin(selected_states)]
+    variables = ['Shark.common.name', 'Victim.activity', 'Provocative.act', 'Victim.injury']
+
+    # Clean the data
+    df_cleaned = df_filtered[variables]
+    df_cleaned = df_cleaned[~df_cleaned['Victim.injury'].str.lower().eq('unknown')]
+    df_cleaned['Victim.injury'] = df_cleaned['Victim.injury'].str.lower().replace(['injury', 'injured'], 'injured')
+    df_cleaned['Victim.activity'] = df_cleaned['Victim.activity'].str.replace(r'^other:.*', 'other', case=False, regex=True)
+    df_cleaned['Provocative.act'] = df_cleaned['Provocative.act'].replace(
+        'victim intentionally moved into immediate proximity of shark',
+        'move close to shark'
+    )
+
+    # Create the SPLOM chart
+    fig = px.scatter_matrix(
+        df_cleaned,
+        dimensions=variables,
+        title="Scatterplot Matrix (SPLOM) of Shark Incidents",
+        labels={
+            'Shark.common.name': 'Shark Name',
+            'Victim.injury': 'Victim Injury',
+            'Victim.activity': 'Victim Activity',
+            'Provocative.act': 'Provocative Act'
+        },
+        color='Victim.injury',
+    )
+    fig.update_layout(
+        dragmode='select',
+        width=900,
+        height=900,
+        showlegend=True,
+    )
+    return fig
+
 
 @app.callback(
     [Output("region-select", "options"), Output("region-select", "value")],
@@ -303,8 +484,8 @@ def update_region_dropdown(state_select, select_all):
     if not state_select:
         return [], []
         
-    # Filter data for the selected state
-    state_data = df_shark[df_shark["State"] == state_select]
+    # Filter data for the selected state(s)
+    state_data = df_shark[df_shark["State"].isin([state_select] if isinstance(state_select, str) else state_select)]
 
     # Get unique regions and handle NaN values
     regions = state_data["Location"].fillna("Unknown Location").unique()
@@ -325,6 +506,8 @@ def update_region_dropdown(state_select, select_all):
         value = []
 
     return options, value
+
+
 @app.callback(
     Output("checklist-container", "children"),
     [Input("region-select", "value")],
@@ -506,71 +689,89 @@ def update_procedure_stats(procedure_select, geo_select, cost_select, state_sele
         style_header={"background-color": "#1f2536", "padding": "2px 12px 0px 12px"},
     )
 
-# Create a mapping from state abbreviations to state codes
-state_code_mapping = {
-    "NSW": "1",  # New South Wales
-    "VIC": "2",  # Victoria
-    "QLD": "3",  # Queensland
-    "WA": "4",   # Western Australia
-    "SA": "5",   # South Australia
-    "TAS": "6",  # Tasmania
-    "NT": "7",   # Northern Territory
-    "ACT": "8",  # Australian Capital Territory
-}
-
 @app.callback(
     Output("geo-map", "figure"),
-    [Input("state-select", "value"), Input("metric-select", "value")]
+    [
+        Input("state-select", "value"),
+        Input("metric-select", "value"),
+        Input("year-slider", "value")
+    ]
 )
-def update_choropleth_map(state_select, selected_metric):
-    # Map the selected state abbreviation to its corresponding state code
-    state_code = state_code_mapping.get(state_select)
-
-    # Filter the DataFrame based on the selected state abbreviation
-    filtered_data = df_shark[df_shark['State'] == state_select]
-
-    # Check if filtered_data is empty
-    if filtered_data.empty:
-        return {
-            "data": [],
-            "layout": go.Layout(
-                title="No data available for the selected state",
-                paper_bgcolor="#171b26",
-                plot_bgcolor="#171b26",
-            ),
+def update_choropleth_map(selected_states, selected_metrics, year_range):
+    if not selected_states:
+        selected_states = df_shark['State'].unique()
+    
+    # Filter by year range
+    filtered_df = df_shark[
+        (df_shark['Incident.year'] >= year_range[0]) & 
+        (df_shark['Incident.year'] <= year_range[1])
+    ]
+    
+    # Create incident counts and metrics
+    metrics_data = {}
+    for state in df_shark['State'].unique():
+        state_data = filtered_df[filtered_df['State'] == state]
+        metrics_data[state] = {
+            'incident_count': len(state_data),
+            'fatal_count': len(state_data[state_data['Victim.injury'] == 'fatal']),
+            'avg_shark_length': state_data['Shark.length.m'].mean(),
+            'avg_victim_age': state_data['Victim.age'].mean()
         }
-
-    # Generate the choropleth plot
-    fig = px.choropleth(
-        data_frame=filtered_data,
+    
+    # Create DataFrame for choropleth
+    plot_data = pd.DataFrame(metrics_data).T.reset_index()
+    plot_data.columns = ['State'] + list(plot_data.columns[1:])
+    
+    # Dynamically generate state_code_mapping
+    state_code_mapping = {state: str(idx + 1) for idx, state in enumerate(plot_data['State'].unique())}
+    plot_data['state_code'] = plot_data['State'].map(state_code_mapping)
+    
+    # Create the choropleth
+    fig = go.Figure(data=go.Choropleth(
         geojson=aus_states_geojson,
-        locations="State",  # Column in DataFrame
-        featureidkey="properties.STATE_CODE",  # Match GeoJSON key to column
-        color=selected_metric,
-        hover_data=["Location", selected_metric],
-        color_continuous_scale=px.colors.sequential.YlOrRd,
-        labels={selected_metric: "Metric Value"},
-    )
-
-    # Update layout for better 
+        locations=plot_data['state_code'],
+        z=plot_data['incident_count'],
+        locationmode='geojson-id',
+        colorscale='Reds',
+        colorbar_title="Incidents",
+        text=[
+            f"State: {row['State']}<br>" +
+            f"Total Incidents: {row['incident_count']}<br>" +
+            f"Fatal Incidents: {row['fatal_count']}<br>" +
+            f"Avg Shark Length: {row['avg_shark_length']:.1f}m"
+            for _, row in plot_data.iterrows()
+        ],
+        hoverinfo='text',
+        marker_line_color='white',
+        marker_line_width=0.5,
+        featureidkey="properties.STATE_CODE"
+    ))
+    
+    # Update layout
     fig.update_geos(
-        fitbounds="locations",
-        visible=True,  # Ensure the map is visible
-        bgcolor="#171b26",  # Background color
-        projection_type="mercator",  # Set projection to Mercator
-        center={"lat": -25.2744, "lon": 133.7751},  # Center on Australia
-        scope="world"  # Set the scope to Asia to focus on Australia
+        visible=True,
+        projection_type="mercator",
+        center={"lat": -25.2744, "lon": 133.7751},
+        lataxis_range=[-45, -10],
+        lonaxis_range=[110, 155],
+        bgcolor='#171b26',
+        showcoastlines=True,
+        coastlinecolor="White",
+        showland=True,
+        landcolor="lightgray",
+        showocean=True,
+        oceancolor="#171b26"
     )
 
     fig.update_layout(
-        margin={"l": 10, "r": 10, "t": 30, "b": 10},
-        title_text="Shark Incidents in Australian States",
-        title_x=0.5,
-        paper_bgcolor="#171b26",  # Match Dash's dark theme
+        title_text=f"Shark Incidents ({year_range[0]}-{year_range[1]})",
+        paper_bgcolor="#171b26",
+        plot_bgcolor="#171b26",
+        font={"color": "white"},
+        height=600
     )
 
     return fig
-
 
 
 if __name__ == "__main__":
